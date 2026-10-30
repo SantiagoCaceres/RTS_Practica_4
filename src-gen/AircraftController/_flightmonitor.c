@@ -28,9 +28,10 @@ void _flightmonitorreaction_function_0(void* instance_args) {
     double real = v_actual->is_present ? v_actual->value : 0.0;
     
     // 3. Imprimir el registro para tu análisis y gráficas posteriores
-    printf("[FlightMonitor] Tag Logica: %lld ms | Tiempo Fisico: %lld ms | ", logical_time, physical_time);
+    printf("[FlightMonitor] Tag Logica: %lld ms | Tiempo Fisico: %lld ms | ",
+           (long long)logical_time, (long long)physical_time);
     printf("v_ref: %.1f | v_med: %.2f | v_real: %.2f | u_T: %.3f\n", ref, med, real, cmd);
-#line 34 "/workspaces/RTS_Practica_4/src-gen/AircraftController/_flightmonitor.c"
+#line 35 "/workspaces/RTS_Practica_4/src-gen/AircraftController/_flightmonitor.c"
 }
 #include "include/api/reaction_macros_undef.h"
 _flightmonitor_self_t* new__flightmonitor() {
