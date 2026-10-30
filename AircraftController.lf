@@ -1,0 +1,191 @@
+target C; // Requisito 2.4.1
+
+// 1. Declaración de los Reactors requeridos (Tabla 1)
+reactor SpeedReference {
+    // Estado inicial
+    state current_ref: double = 100.0;
+
+    // Puerto de salida hacia el controlador
+    output v_ref: double;
+
+    // Timer periódico de 100 ms para publicar la referencia
+    timer ref_timer(0, 100 ms);
+    
+    // Timer de evento único (offset) para forzar el escalón a los 2 segundos
+    timer step_event(2 s);
+
+    // Reacción 1: Cambiar la velocidad programada (El escalón)
+    reaction(step_event) {=
+        // Cuando el tiempo lógico llega a 2 segundos, cambiamos el estado interno
+        self->current_ref = 110.0;
+        printf("[SpeedReference] Evento: Cambio de referencia a 110.0 m/s\n");
+    =}
+
+    // Reacción 2: Publicar periódicamente la referencia al controlador
+    reaction(ref_timer) -> v_ref {=
+        // Publica la referencia vigente (100.0 al inicio, 110.0 después de los 2s)
+        lf_set(v_ref, self->current_ref);
+    =}
+}
+
+reactor AirDataSensor {
+    // Estado interno para almacenar la perturbación vigente
+    state current_disturbance: double = 0.0;
+
+    // Puertos
+    input v_in: double; // Velocidad real proveniente de la planta
+    input perturbation_input: double; // Entrada de evento para inyectar perturbación
+    output v_med: double; // Velocidad medida (con perturbación)
+
+    // Timer a 5 ms (200 Hz)
+    timer sensor_timer(0, 5 ms);
+
+    // Reacción 1: Actualizar la perturbación de forma asíncrona
+    reaction(perturbation_input) {=
+        // Cuando llega un evento, actualiza el estado interno
+        self->current_disturbance = perturbation_input->value;
+    =}
+
+    // Reacción 2: Medición y publicación periódica
+    reaction(sensor_timer) v_in -> v_med {=
+        // 1. Tomar la velocidad simulada actual de la planta
+        double true_speed = 0.0;
+        if (v_in->is_present) {
+            true_speed = v_in->value;
+        }
+
+        // 2. Aplicar el modelo: v_med[k] = v[k] + d_v[k]
+        double measured_speed = true_speed + self->current_disturbance;
+
+        // 3. Publicar el resultado al controlador
+        lf_set(v_med, measured_speed);
+    =}
+}
+
+reactor SpeedController {
+    // Parámetros internos del controlador
+    state Kp: double = 0.05; // Ganancia proporcional (ajustable experimentalmente)
+    state current_vref: double = 100.0; // Velocidad de referencia por defecto (m/s)
+
+    // Puertos
+    input v_med: double; // Velocidad medida proveniente del sensor
+    input v_ref_in: double; // Nueva referencia proveniente del SpeedReference
+    output u_T: double; // Comando de empuje saturado (0 a 1)
+
+    // Timer para el cálculo periódico (10 ms)
+    timer controller_timer(0, 10 ms);
+
+    // Reacción 1: Actualizar la referencia de forma asíncrona
+    reaction(v_ref_in) {=
+        // Cuando llegue un evento de cambio de referencia, lo guardamos en el estado interno
+        self->current_vref = v_ref_in->value;
+    =}
+
+    // Reacción 2: Cálculo periódico del empuje
+    reaction(controller_timer) v_med -> u_T {=
+        // 1. Obtener la velocidad medida (si está presente)
+        double current_vmed = 0.0;
+        if (v_med->is_present) {
+            current_vmed = v_med->value;
+        }
+
+        // 2. Calcular el error de velocidad
+        double error_v = self->current_vref - current_vmed;
+
+        // 3. Control Proporcional y Saturación sat(x, 0, 1)
+        double control_signal = self->Kp * error_v;
+        
+        if (control_signal > 1.0) {
+            control_signal = 1.0;
+        } else if (control_signal < 0.0) {
+            control_signal = 0.0;
+        }
+
+        // 4. Publicar el comando de empuje normalizado
+        lf_set(u_T, control_signal);
+    =}
+}
+
+reactor AircraftDynamics {
+    // Parámetros de la planta justificados previamente
+    state Ts: double = 0.01; // Periodo de 10 ms
+    state a_T: double = 15.0; // Eficacia del empuje
+    state a_D: double = 0.05; // Resistencia aerodinámica
+    
+    // Estado interno (velocidad simulada v[k])
+    state v: double = 0.0;
+
+    // Puertos
+    input u_T: double; // Comando de empuje normalizado (0 a 1)
+    output v_out: double; // Velocidad de salida
+
+    // Timer para cumplir el período de 10 ms
+    timer update_timer(0, 10 ms);
+
+    // Reaction principal para calcular la nueva velocidad
+    reaction(update_timer) u_T -> v_out {=
+        // 1. Leer el comando de empuje. 
+        // Si no ha llegado ninguno, asumimos 0 (o el último estado, según el diseño)
+        double current_u = 0.0;
+        if (u_T->is_present) {
+            current_u = u_T->value;
+        }
+
+        // 2. Aplicar la ecuación en diferencias: v[k+1] = v[k] + Ts(a_T * u_T[k] - a_D * v[k])
+        self->v = self->v + self->Ts * (self->a_T * current_u - self->a_D * self->v);
+
+        // 3. Publicar la velocidad simulada actualizada
+        lf_set(v_out, self->v);
+    =}
+}
+
+reactor FlightMonitor {
+    // Puertos de entrada con todos los datos relevantes de la simulación
+    input v_ref: double;
+    input v_med: double;
+    input u_T: double;
+    input v_actual: double;
+
+    // Timer periódico para registrar los datos (100 ms)
+    timer monitor_timer(0, 100 ms);
+
+    reaction(monitor_timer) v_ref, v_med, u_T, v_actual {=
+        // 1. Obtener los tiempos lógico y físico en nanosegundos y convertirlos a milisegundos
+        instant_t logical_time = lf_time_logical() / 1000000;
+        instant_t physical_time = lf_time_physical() / 1000000;
+        
+        // 2. Extraer los datos (si están presentes en este ciclo)
+        double ref = v_ref->is_present ? v_ref->value : 0.0;
+        double med = v_med->is_present ? v_med->value : 0.0;
+        double cmd = u_T->is_present ? u_T->value : 0.0;
+        double real = v_actual->is_present ? v_actual->value : 0.0;
+
+        // 3. Imprimir el registro para tu análisis y gráficas posteriores
+        printf("[FlightMonitor] Tag Logica: %lld ms | Tiempo Fisico: %lld ms | ", logical_time, physical_time);
+        printf("v_ref: %.1f | v_med: %.2f | v_real: %.2f | u_T: %.3f\n", ref, med, real, cmd);
+    =}
+}
+
+// 2. Reactor Principal y Conexiones Causales
+main reactor AircraftController {
+    // Instanciar todos los módulos requeridos
+    ref = new SpeedReference();
+    sensor = new AirDataSensor();
+    ctrl = new SpeedController();
+    plant = new AircraftDynamics();
+    monitor = new FlightMonitor();
+
+    // 1. Lazo de Control y Dinámica
+    ref.v_ref -> ctrl.v_ref_in;      
+    sensor.v_med -> ctrl.v_med;      
+    ctrl.u_T -> plant.u_T;           
+    
+    // AQUÍ COLOCAS EL AFTER PARA EL RETARDO LÓGICO
+    plant.v_out -> sensor.v_in after 5 ms; 
+
+    // 2. Conexiones hacia el sistema de Monitorización (Registro de datos)
+    ref.v_ref -> monitor.v_ref;
+    sensor.v_med -> monitor.v_med;
+    ctrl.u_T -> monitor.u_T;
+    plant.v_out -> monitor.v_actual;
+}

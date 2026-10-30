@@ -1,0 +1,67 @@
+1. ¿Qué diferencia existe entre reactor, reaction, timer, puerto y conexión en LF? 
+
+En Lingua Franca (LF), estos cinco elementos constituyen la arquitectura básica de un programa reactivo.
+
+* **Reactor:** Es el bloque de construcción o módulo principal del sistema, equivalente a un objeto en programación orientada a objetos o a un sistema embebido encapsulado. Mantiene su propio estado interno y no comparte memoria con otros módulos. En el escenario de la práctica, módulos como *SpeedController*, *AirDataSensor* y *AircraftDynamics* son implementados como reactors independientes.
+
+
+* **Reaction (Reacción):** Es el fragmento de código ejecutable (la subrutina) que vive dentro de un reactor. A diferencia de un programa tradicional en C que se ejecuta línea por línea, una reaction está dormida hasta que es "disparada" por un evento específico. Por ejemplo, el *AirDataSensor* debe tener una reaction que calcula y publica la velocidad periódicamente, y otra reaction distinta que actúa únicamente cuando recibe una señal de perturbación.
+
+
+* **Timer (Temporizador):** Es un disparador interno que genera eventos en instantes precisos del tiempo lógico, ya sea una sola vez tras un retraso (offset) o de forma cíclica. Se utiliza para despertar a las reactions. En el laboratorio, se configuran timers para garantizar las frecuencias requeridas, como los 10 ms asignados al controlador o los 100 ms del monitor.
+
+
+* **Puerto (Port):** Es la interfaz de comunicación de un reactor, actuando como los pines de entrada (inputs) o salida (outputs) de un microcontrolador. Permiten que los reactors intercambien información sin conocer los detalles internos del otro. LF exige que estos puertos sean tipados, es decir, que definan claramente si envían un entero, un flotante o una estructura de datos.
+
+
+* **Conexión (Connection):** Es el enlace directo o "cable" que vincula el puerto de salida de un reactor con el puerto de entrada de otro. Más allá de transportar los datos (como el comando de empuje desde el controlador hacia la planta aeronáutica), la conexión establece una estricta **dependencia causal**. Gracias a las conexiones, el planificador (scheduler) de LF comprende implícitamente el orden válido de ejecución: sabe que no puede ejecutar la reaction que recibe el dato hasta que la reaction emisora haya finalizado.
+
+ 2. ¿Qué representa una tag (tiempo lógico y microstep)? ¿Pueden ejecutarse dos reactions
+con la misma etiqueta temporal? Explique
+
+En Lingua Franca (LF), una **tag (etiqueta temporal)** representa el instante lógico exacto en el que ocurre un evento dentro del modelo reactivo discreto, y está compuesta por una tupla matemática bidimensional: **(tiempo lógico, microstep)**.
+
+* **Tiempo lógico:** Es la magnitud principal (generalmente representada en nanosegundos) que marca el avance temporal del sistema desde que inicia su ejecución. A diferencia del tiempo físico de la CPU (que fluye continuamente), el tiempo lógico salta directamente de un evento a otro.
+* **Microstep:** Es un número entero secuencial (0, 1, 2...) diseñado para desempatar y ordenar eventos que ocurren en el mismo instante de tiempo lógico. Si una *reaction* produce una salida que desencadena inmediatamente una segunda acción sin introducir un retardo (delay) explícito, esa segunda acción sucederá en el mismo tiempo lógico, pero en el siguiente *microstep*.
+
+**Sí, pueden ejecutarse dos (o múltiples) *reactions* con la misma etiqueta temporal**, y es el mecanismo fundamental que permite aprovechar el paralelismo en el lenguaje. Que tengan la misma tag significa que, desde la perspectiva del sistema, ocurren "al mismo tiempo". El orden real en el que el procesador físico ejecuta estas *reactions* depende exclusivamente de sus **dependencias causales**:
+
+* **Ejecución concurrente (en paralelo):** Si dos *reactions* son activadas en la misma etiqueta temporal (por ejemplo, dos sensores distintos que miden a los 10 ms) y no existe ninguna conexión o dependencia de datos entre ellas, el planificador (scheduler) de LF asume que son independientes. Si el código se compila para múltiples hilos, ambas *reactions* se ejecutarán físicamente al mismo tiempo en núcleos distintos de la CPU.
+* **Ejecución causal (secuencial):** Si comparten la misma etiqueta temporal pero están conectadas lógicamente (por ejemplo, el *SpeedController* necesita el dato que acaba de producir el *AirDataSensor* en ese mismo ciclo), el planificador de LF lee el diagrama de conexiones para determinar el orden válido de ejecución. Ambas *reactions* operan bajo la misma tag, pero el sistema garantiza que la *reaction* emisora se ejecute y finalice primero en tiempo físico, para que cuando la receptora arranque, el dato ya esté disponible de forma determinista.
+
+
+3. ¿Por qué el período lógico no equivale necesariamente al intervalo físico medido entre el
+inicio de dos ejecuciones de un módulo o tarea periódica? 
+
+El período lógico y el intervalo físico entre ejecuciones de una tarea periódica en Lingua Franca no son necesariamente equivalentes porque representan dos conceptos temporales que operan en dominios distintos, y la ejecución real está sujeta a las limitaciones físicas del hardware.
+
+* **El Período Lógico (El Ideal):** Representa el tiempo dictaminado por la semántica y el modelo matemático de LF. Si un timer está configurado para dispararse cada $5\text{ ms}$, el tiempo lógico del planificador saltará abstractamente en incrementos matemáticos perfectos ($5.000\text{ ms}$, $10.000\text{ ms}$, etc.).
+* **El Intervalo Físico (La Realidad):** Es el tiempo real que puedes medir (con un cronómetro o un registro de timestamps) entre el inicio de las ejecuciones en la CPU física.
+
+La diferencia entre ambos se denomina **jitter** y ocurre debido a las siguientes causas o *overhead* del sistema real:
+
+  1. **Latencia de Interrupción y Context Saving:** Cuando el temporizador físico del procesador genera el evento de tiempo, la CPU no puede reaccionar instantáneamente. Primero debe finalizar la instrucción actual (multiciclo) y ejecutar el prólogo de la interrupción (guardar su estado actual y registros de trabajo en la memoria *Stack*). Este proceso consume valiosos ciclos de reloj antes de ejecutar la primera línea de la *reaction*.
+
+
+  2. **Planificación (Scheduling) y Concurrencia:** El planificador de tareas (ya sea del kernel de Linux o de RTOS) debe decidir qué hilo (thread) ejecutar y asignarle el núcleo. Si el sistema está ocupado con otra tarea de mayor prioridad, la ejecución de la *reaction* física se retrasará.
+
+
+  3. **Dependencias Causales:** Las conexiones en LF exigen un orden estricto. Si un módulo debe activarse periódicamente pero depende de los datos de un módulo previo cuyo tiempo de cómputo físico se retrasó (por ejemplo, operaciones matemáticas complejas que saturan la CPU), el segundo módulo iniciará su ejecución más tarde de lo previsto, alejándose del intervalo físico ideal.
+
+4. ¿Qué ventajas ofrece expresar la comunicación mediante puertos y conexiones, frente a
+implementar manualmente hilos y variables compartidos, usando POSIX?
+
+El período lógico y el intervalo físico entre ejecuciones de una tarea periódica en Lingua Franca no son necesariamente equivalentes porque representan dos conceptos temporales que operan en dominios distintos, y la ejecución real está sujeta a las limitaciones físicas del hardware.
+
+* **El Período Lógico (El Ideal):** Representa el tiempo dictaminado por la semántica y el modelo matemático de LF. Si un timer está configurado para dispararse cada $5\text{ ms}$, el tiempo lógico del planificador saltará abstractamente en incrementos matemáticos perfectos ($5.000\text{ ms}$, $10.000\text{ ms}$, etc.).
+* **El Intervalo Físico (La Realidad):** Es el tiempo real que puedes medir (con un cronómetro o un registro de timestamps) entre el inicio de las ejecuciones en la CPU física.
+
+La diferencia entre ambos se denomina **jitter** y ocurre debido a las siguientes causas o *overhead* del sistema real:
+
+1. **Latencia de Interrupción y Context Saving:** Cuando el temporizador físico del procesador genera el evento de tiempo, la CPU no puede reaccionar instantáneamente. Primero debe finalizar la instrucción actual (multiciclo) y ejecutar el prólogo de la interrupción (guardar su estado actual y registros de trabajo en la memoria *Stack*). Este proceso consume valiosos ciclos de reloj antes de ejecutar la primera línea de la *reaction*.
+
+
+2. **Planificación (Scheduling) y Concurrencia:** El planificador de tareas (ya sea del kernel de Linux o de RTOS) debe decidir qué hilo (thread) ejecutar y asignarle el núcleo. Si el sistema está ocupado con otra tarea de mayor prioridad, la ejecución de la *reaction* física se retrasará.
+
+
+3. **Dependencias Causales:** Las conexiones en LF exigen un orden estricto. Si un módulo debe activarse periódicamente pero depende de los datos de un módulo previo cuyo tiempo de cómputo físico se retrasó (por ejemplo, operaciones matemáticas complejas que saturan la CPU), el segundo módulo iniciará su ejecución más tarde de lo previsto, alejándose del intervalo físico ideal.
