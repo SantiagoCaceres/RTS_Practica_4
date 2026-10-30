@@ -157,7 +157,7 @@ void _lf_initialize_trigger_objects() {
         environments[aircraftcontroller_main].timer_triggers[timer_triggers_count[aircraftcontroller_main]++] = &aircraftcontroller_ref_self[0]->_lf__ref_timer;
         aircraftcontroller_ref_self[0]->_lf__ref_timer.mode = NULL;
         // Initiaizing timer AircraftController.ref.step_event.
-        aircraftcontroller_ref_self[0]->_lf__step_event.offset = SEC(6);
+        aircraftcontroller_ref_self[0]->_lf__step_event.offset = SEC(20);
         aircraftcontroller_ref_self[0]->_lf__step_event.period = 0;
         // Associate timer with the environment of its parent
         environments[aircraftcontroller_main].timer_triggers[timer_triggers_count[aircraftcontroller_main]++] = &aircraftcontroller_ref_self[0]->_lf__step_event;
@@ -221,7 +221,7 @@ void _lf_initialize_trigger_objects() {
         // width of -2 indicates that it is not a multiport.
         aircraftcontroller_ctrl_self[0]->_lf_v_ref_in_width = -2;
         { // For scoping
-            static double _initial = 0.2;
+            static double _initial = 0.28;
             aircraftcontroller_ctrl_self[0]->Kp = _initial;
         } // End scoping.
         { // For scoping

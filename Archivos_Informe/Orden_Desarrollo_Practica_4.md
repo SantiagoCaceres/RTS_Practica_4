@@ -11,6 +11,7 @@ La arquitectura del sistema está compuesta por los siguientes módulos:
 - `SpeedController`
 - `AircraftDynamics`
 - `FlightMonitor`
+- `DisturbanceProfile`
 
 ---
 
@@ -93,11 +94,11 @@ donde:
 
 ## 4. Desarrollo de los módulos
 
-Se implementó un reactor principal que instancia y conecta los cinco módulos requeridos. Cada módulo usa un timer con el período definido para su función.
+Se implementó un reactor principal que instancia y conecta los cinco módulos funcionales requeridos, junto con el módulo auxiliar `DisturbanceProfile`. Cada módulo usa uno o más timers con el período u offset definido para su función.
 
 ### 4.1. `SpeedReference`
 
-Publica la referencia inicial de 100 m/s cada 100 ms. También contiene un evento programado a los 2 s para cambiar la referencia a 110 m/s.
+Publica la referencia inicial de 100 m/s cada 100 ms. La configuración actual contiene un evento programado a los 20 s para cambiar la referencia a 110 m/s.
 
 ### 4.2. `AirDataSensor`
 
@@ -105,7 +106,7 @@ Recibe la velocidad simulada de la planta, aplica la perturbación vigente y pub
 
 ### 4.3. `SpeedController`
 
-Cada 10 ms calcula el error entre `v_ref` y `v_med`, aplica la ganancia proporcional `Kp = 0.05` y limita el empuje `u_T` al intervalo [0, 1]. También guarda la referencia recibida para usarla en los cálculos periódicos.
+Cada 10 ms calcula el error entre `v_ref` y `v_med`, aplica la ganancia proporcional (actualmente `Kp = 0.28`) y limita el empuje `u_T` al intervalo [0, 1]. También guarda la referencia recibida para usarla en los cálculos periódicos.
 
 ### 4.4. `AircraftDynamics`
 
@@ -121,14 +122,39 @@ La planta publica la velocidad actualizada por `v_out`, que se envía al sensor 
 
 Cada 100 ms registra la referencia, la velocidad medida, la velocidad real de la planta y el comando de empuje para observar la respuesta del sistema.
 
-## 5. Error encontrado y solución
+### 4.6. `DisturbanceProfile`
+
+Genera una perturbación de velocidad y la envía al sensor. En la configuración actual, aplica `-5.0 m/s` a partir de 1 s y la retira a los 1.05 s. El sensor suma esta perturbación a la última velocidad real recibida para producir `v_med`.
+
+## 5. Retardo lógico `after` y medición de velocidad
+
+La conexión entre la planta y el sensor se define como:
+
+```lf
+plant.v_out -> sensor.v_in after 5 ms;
+```
+
+El `after 5 ms` es importante por dos motivos relacionados:
+
+1. **Rompe el ciclo causal instantáneo del lazo de realimentación.** La información recorre `AirDataSensor -> SpeedController -> AircraftDynamics -> AirDataSensor`. Sin un retardo en esa última conexión, el modelo pediría que la medición del sensor dependiera del cálculo de la planta y, a la vez, que el cálculo de la planta dependiera de esa medición en el mismo tiempo lógico. El retardo hace explícito que la muestra de la planta se podrá usar en un instante lógico posterior, en vez de requerir una solución instantánea de ese ciclo.
+2. **Alinea la llegada de muestras con los períodos de los reactores.** La planta actualiza `v_out` cada 10 ms y el sensor toma muestras cada 5 ms. Al desplazar la muestra de la planta 5 ms, esta llega en una tag posterior y puede ser procesada por el sensor; no se presupone que una entrada esté presente en el mismo instante lógico en que la planta la produce.
+
+Este retardo es de **tiempo lógico**, no una pausa física (`sleep`) de 5 ms dentro del código. LF agenda la entrega para una tag 5 ms posterior. Así, la dependencia temporal queda representada en el modelo y el scheduler puede ordenar las reactions de manera determinista.
+
+El retardo por sí solo no hace que `v_in` esté presente en todos los ticks del sensor: la planta produce datos cada 10 ms y el sensor se activa cada 5 ms. Por eso la reaction del sensor también conserva la última muestra en `current_speed`. Cuando llega `v_in`, actualiza ese estado; en los demás ticks publica la última velocidad recibida, sumada a la perturbación vigente. Esto evita reemplazar la medida por cero cuando no llega una muestra nueva en ese tick.
+
+## 6. Error encontrado y solución
 
 Durante la ejecución se observó que `v_med` permanecía en cero, aunque `v_real` sí aumentaba. El problema no estaba en la ecuación de la planta: `AircraftDynamics` estaba actualizando correctamente la velocidad. El inconveniente estaba en el sensor.
 
-La reacción original del sensor se activaba con su timer de 5 ms y leía `v_in` únicamente si esa entrada estaba presente en la misma tag. Sin embargo, la planta publica cada 10 ms y su salida llega al sensor con un retardo de 5 ms. Por lo tanto, `v_in` no está presente en todos los ticks del timer. Cuando no coincidían, el código asignaba cero a la velocidad medida y publicaba ese cero.
+La medición requiere tanto el retardo lógico de la conexión como el almacenamiento de la última muestra: `after 5 ms` modela la causalidad y el instante de entrega, mientras que `current_speed` permite seguir publicando una medida válida entre actualizaciones de la planta. La reaction del sensor se activa por el timer o por una nueva muestra de `v_in`; si llega una muestra, actualiza el estado y publica `current_speed + current_disturbance`.
 
-La corrección consiste en conservar en el estado `current_speed` la última velocidad recibida. La reacción del sensor se activa tanto por el timer como por una nueva muestra de `v_in`: si llega una muestra, actualiza el estado; en cada activación publica `current_speed + current_disturbance`. Así, cuando no hay una muestra nueva en un tick, se reutiliza la última válida en lugar de reemplazarla por cero.
+## 7. Experimentación con `Kp` y perturbaciones
 
-## 6. Estado actual
+Se probaron distintos valores de `Kp` para observar cómo cambia la respuesta del lazo. Al aumentar `Kp`, el controlador genera una corrección de empuje mayor para un mismo error entre la referencia y la velocidad medida; al reducirla, la corrección es más moderada. La saturación de `u_T` en el intervalo `[0, 1]` limita el empuje disponible, por lo que también se observó la señal de control junto con `v_ref`, `v_med` y `v_real` en `FlightMonitor`. La configuración actual usa `Kp = 0.28`.
 
-Con esta corrección, la planta mantiene su dinámica de actualización cada 10 ms y el sensor publica una medición basada en la última velocidad disponible cada 5 ms. En la primera activación puede aparecer `v_med = 0`, porque todavía no se ha recibido una muestra de la planta; en las activaciones siguientes ya se conserva y publica la última muestra disponible. La compilación y una ejecución corta confirmaron que `v_med` pasa a valores positivos mientras `v_real` aumenta.
+También se programaron perturbaciones en distintos instantes de la simulación para observar cómo el sistema responde ante cambios en la medición y cómo el controlador intenta recuperar la referencia. La configuración actual aplica una perturbación de `-5.0 m/s` entre 1 s y 1.05 s; al desplazar los instantes de aplicación en las pruebas, es posible comparar la respuesta según el punto de la evolución en que se introduce la perturbación.
+
+## 8. Estado actual
+
+Con el retardo lógico y la conservación de la última muestra, la planta mantiene su actualización cada 10 ms y el sensor publica una medición basada en la última velocidad disponible cada 5 ms. En la primera activación puede aparecer `v_med = 0`, porque todavía no se ha recibido una muestra de la planta; en las activaciones siguientes se conserva y publica la última muestra disponible. El monitor permite observar la referencia, la velocidad medida, la velocidad real y el comando de empuje durante la simulación.

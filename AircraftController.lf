@@ -12,7 +12,7 @@ reactor SpeedReference {
     timer ref_timer(0, 100 ms);
     
     // Timer de evento único (offset) para forzar el escalón a los 2 segundos
-    timer step_event(6 s);
+    timer step_event(20 s);
 
     // Reacción 1: Cambiar la velocidad programada (El escalón)
     reaction(step_event) {=
@@ -64,7 +64,7 @@ reactor AirDataSensor {
 
 reactor SpeedController {
     // Parámetros internos del controlador
-    state Kp: double = 0.2; // Ganancia proporcional (ajustable experimentalmente)
+    state Kp: double = 0.28; // Ganancia proporcional (ajustable experimentalmente)
     state current_vref: double = 100.0; // Velocidad de referencia por defecto (m/s)
 
     // Puertos
