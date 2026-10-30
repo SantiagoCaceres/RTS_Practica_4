@@ -12,7 +12,7 @@ reactor SpeedReference {
     timer ref_timer(0, 100 ms);
     
     // Timer de evento único (offset) para forzar el escalón a los 2 segundos
-    timer step_event(2 s);
+    timer step_event(6 s);
 
     // Reacción 1: Cambiar la velocidad programada (El escalón)
     reaction(step_event) {=
@@ -31,6 +31,7 @@ reactor SpeedReference {
 reactor AirDataSensor {
     // Estado interno para almacenar la perturbación vigente
     state current_disturbance: double = 0.0;
+    state current_speed: double = 0.0;
 
     // Puertos
     input v_in: double; // Velocidad real proveniente de la planta
@@ -46,25 +47,24 @@ reactor AirDataSensor {
         self->current_disturbance = perturbation_input->value;
     =}
 
-    // Reacción 2: Medición y publicación periódica
-    reaction(sensor_timer) v_in -> v_med {=
-        // 1. Tomar la velocidad simulada actual de la planta
-        double true_speed = 0.0;
+    // Reacción 2: Publicar periódicamente la última velocidad recibida
+    reaction(sensor_timer, v_in) -> v_med {=
+        // Actualizar la muestra si llegó un dato nuevo de la planta
         if (v_in->is_present) {
-            true_speed = v_in->value;
+            self->current_speed = v_in->value;
         }
 
-        // 2. Aplicar el modelo: v_med[k] = v[k] + d_v[k]
-        double measured_speed = true_speed + self->current_disturbance;
+        // Aplicar el modelo: v_med[k] = v[k] + d_v[k]
+        double measured_speed = self->current_speed + self->current_disturbance;
 
-        // 3. Publicar el resultado al controlador
+        // Publicar la última muestra disponible en cada período del sensor
         lf_set(v_med, measured_speed);
     =}
 }
 
 reactor SpeedController {
     // Parámetros internos del controlador
-    state Kp: double = 0.05; // Ganancia proporcional (ajustable experimentalmente)
+    state Kp: double = 0.2; // Ganancia proporcional (ajustable experimentalmente)
     state current_vref: double = 100.0; // Velocidad de referencia por defecto (m/s)
 
     // Puertos
@@ -166,6 +166,21 @@ reactor FlightMonitor {
     =}
 }
 
+reactor DisturbanceProfile {
+    output dv: double;
+
+    timer disturbance_start(1 s);
+    timer disturbance_end(1050 ms);
+
+    reaction(disturbance_start) -> dv {=
+        lf_set(dv, -5.0);
+    =}
+
+    reaction(disturbance_end) -> dv {=
+        lf_set(dv, 0.0);
+    =}
+}
+
 // 2. Reactor Principal y Conexiones Causales
 main reactor AircraftController {
     // Instanciar todos los módulos requeridos
@@ -174,13 +189,14 @@ main reactor AircraftController {
     ctrl = new SpeedController();
     plant = new AircraftDynamics();
     monitor = new FlightMonitor();
+    disturbance = new DisturbanceProfile();
 
     // 1. Lazo de Control y Dinámica
     ref.v_ref -> ctrl.v_ref_in;      
     sensor.v_med -> ctrl.v_med;      
     ctrl.u_T -> plant.u_T;           
     
-    // AQUÍ COLOCAS EL AFTER PARA EL RETARDO LÓGICO
+    //AFTER PARA EL RETARDO LÓGICO
     plant.v_out -> sensor.v_in after 5 ms; 
 
     // 2. Conexiones hacia el sistema de Monitorización (Registro de datos)
@@ -188,4 +204,8 @@ main reactor AircraftController {
     sensor.v_med -> monitor.v_med;
     ctrl.u_T -> monitor.u_T;
     plant.v_out -> monitor.v_actual;
+
+    // Se agrega conexiones para perturbacion
+    disturbance.dv -> sensor.perturbation_input;
 }
+

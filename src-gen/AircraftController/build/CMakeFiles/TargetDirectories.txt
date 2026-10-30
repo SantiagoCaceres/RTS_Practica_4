@@ -1,0 +1,16 @@
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/AircraftController.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/edit_cache.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/rebuild_cache.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/list_install_components.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/install.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/install/local.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/CMakeFiles/install/strip.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/reactor-c.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/lf-low-level-platform-impl.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/lf-platform-impl.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/edit_cache.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/rebuild_cache.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/list_install_components.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/install.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/install/local.dir
+/workspaces/RTS_Practica_4/src-gen/AircraftController/build/core/CMakeFiles/install/strip.dir

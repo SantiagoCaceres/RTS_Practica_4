@@ -91,31 +91,44 @@ donde:
 
 ---
 
-## Inicio del desarrollo del módulo `AircraftDynamics`
+## 4. Desarrollo de los módulos
 
-El módulo `AircraftDynamics` será el punto de partida para la implementación de la dinámica de la aeronave. Su responsabilidad principal es actualizar la velocidad longitudinal simulada a partir del comando de empuje recibido y de la resistencia aerodinámica del sistema.
+Se implementó un reactor principal que instancia y conecta los cinco módulos requeridos. Cada módulo usa un timer con el período definido para su función.
 
-###  Función principal
+### 4.1. `SpeedReference`
 
-El módulo debe:
+Publica la referencia inicial de 100 m/s cada 100 ms. También contiene un evento programado a los 2 s para cambiar la referencia a 110 m/s.
 
-- recibir el valor del comando de empuje $u_T[k]$,
-- usar el estado actual de la velocidad $v[k]$,
-- aplicar la ecuación de actualización discreta,
-- producir la nueva velocidad $v[k+1]$.
+### 4.2. `AirDataSensor`
 
-### Ecuación de actualización
+Recibe la velocidad simulada de la planta, aplica la perturbación vigente y publica `v_med` cada 5 ms. Conserva la última velocidad recibida para poder seguir entregando una medición válida entre actualizaciones de la planta.
 
-La relación discreta propuesta es:
+### 4.3. `SpeedController`
+
+Cada 10 ms calcula el error entre `v_ref` y `v_med`, aplica la ganancia proporcional `Kp = 0.05` y limita el empuje `u_T` al intervalo [0, 1]. También guarda la referencia recibida para usarla en los cálculos periódicos.
+
+### 4.4. `AircraftDynamics`
+
+Cada 10 ms actualiza el estado de velocidad `v` con la ecuación discreta:
 
 $$
- v[k+1] = v[k] + T_s \cdot (a_T \cdot u_T[k] - a_D \cdot v[k])
+v[k+1] = v[k] + T_s \cdot (a_T \cdot u_T[k] - a_D \cdot v[k])
 $$
 
-Esto permite modelar un sistema de primer orden donde:
+La planta publica la velocidad actualizada por `v_out`, que se envía al sensor con un retardo lógico de 5 ms.
 
-- el empuje aumenta la velocidad,
-- la resistencia aerodinámica disminuye la velocidad,
-- el sistema converge hacia un valor estacionario dependiendo del comando $u_T[k]$.
+### 4.5. `FlightMonitor`
 
+Cada 100 ms registra la referencia, la velocidad medida, la velocidad real de la planta y el comando de empuje para observar la respuesta del sistema.
 
+## 5. Error encontrado y solución
+
+Durante la ejecución se observó que `v_med` permanecía en cero, aunque `v_real` sí aumentaba. El problema no estaba en la ecuación de la planta: `AircraftDynamics` estaba actualizando correctamente la velocidad. El inconveniente estaba en el sensor.
+
+La reacción original del sensor se activaba con su timer de 5 ms y leía `v_in` únicamente si esa entrada estaba presente en la misma tag. Sin embargo, la planta publica cada 10 ms y su salida llega al sensor con un retardo de 5 ms. Por lo tanto, `v_in` no está presente en todos los ticks del timer. Cuando no coincidían, el código asignaba cero a la velocidad medida y publicaba ese cero.
+
+La corrección consiste en conservar en el estado `current_speed` la última velocidad recibida. La reacción del sensor se activa tanto por el timer como por una nueva muestra de `v_in`: si llega una muestra, actualiza el estado; en cada activación publica `current_speed + current_disturbance`. Así, cuando no hay una muestra nueva en un tick, se reutiliza la última válida en lugar de reemplazarla por cero.
+
+## 6. Estado actual
+
+Con esta corrección, la planta mantiene su dinámica de actualización cada 10 ms y el sensor publica una medición basada en la última velocidad disponible cada 5 ms. En la primera activación puede aparecer `v_med = 0`, porque todavía no se ha recibido una muestra de la planta; en las activaciones siguientes ya se conserva y publica la última muestra disponible. La compilación y una ejecución corta confirmaron que `v_med` pasa a valores positivos mientras `v_real` aumenta.
